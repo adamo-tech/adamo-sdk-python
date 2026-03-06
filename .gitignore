@@ -1,5 +1,7 @@
 __pycache__/
 *.pyc
+*.so
 dist/
 *.egg-info/
 .venv/
+target/

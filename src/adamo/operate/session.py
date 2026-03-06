@@ -264,6 +264,57 @@ class Session:
             resolved, _handler, history=history
         )
 
+    # -- Video -----------------------------------------------------------------
+
+    def video(
+        self,
+        source: str,
+        *,
+        name: str | None = None,
+        robot_name: str | None = None,
+        bitrate: int = 2000,
+        fps: int = 30,
+        encoder: str | None = None,
+        stereo: bool = False,
+        fec: bool = False,
+        nack: bool = False,
+    ) -> VideoStream:
+        """Start a video stream from the given source.
+
+        The source can be:
+        - A V4L2 device path (e.g. ``/dev/video0``)
+        - A GStreamer pipeline string (e.g. ``videotestsrc ! video/x-raw,width=640,height=480``)
+        - A ROS topic (e.g. ``/camera/image_raw``)
+
+        Requires the native video extension (``pip install adamo[video]``
+        or ``cd adamo-py && maturin develop --release``).
+
+        Returns a :class:`VideoStream` that can be used as a context manager.
+        """
+        try:
+            from adamo._adamo_video import start_video
+        except ImportError:
+            raise ImportError(
+                "Native video extension not available. "
+                "Install with: cd adamo-py && maturin develop --release"
+            )
+
+        rn = robot_name or "python"
+        handle = start_video(
+            self._info.quic_endpoint,
+            self._info.org,
+            rn,
+            source,
+            track_name=name,
+            bitrate=bitrate,
+            fps=fps,
+            encoder=encoder,
+            stereo=stereo,
+            fec=fec,
+            nack=nack,
+        )
+        return VideoStream(handle, handle.track_name)
+
     # -- Lifecycle -------------------------------------------------------------
 
     def close(self) -> None:
@@ -274,3 +325,28 @@ class Session:
 
     def __exit__(self, *_):
         self.close()
+
+
+class VideoStream:
+    """Handle to a running video stream. Use as a context manager."""
+
+    __slots__ = ("_handle", "_name")
+
+    def __init__(self, native_handle: object, name: str):
+        self._handle = native_handle
+        self._name = name
+
+    @property
+    def track_name(self) -> str:
+        return self._name
+
+    def stop(self) -> None:
+        if self._handle is not None:
+            self._handle.stop()
+            self._handle = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.stop()

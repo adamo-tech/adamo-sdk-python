@@ -1,6 +1,6 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["maturin>=1.7"]
+build-backend = "maturin"
 
 [project]
 name = "adamo"
@@ -19,4 +19,11 @@ ml = ["torch>=2", "av>=13", "numpy>=1.24"]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.25",
+    "maturin>=1.7",
 ]
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+manifest-path = "rust/Cargo.toml"
+module-name = "adamo._adamo_video"
+python-source = "src"

@@ -1,0 +1,17 @@
+[package]
+name = "adamo-py-native"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "_adamo_video"
+crate-type = ["cdylib"]
+
+[dependencies]
+adamo-video = { path = "../../adamo-video" }
+pyo3 = { version = "0.24", features = ["extension-module"] }
+zenoh = { version = "=1.7.2", features = ["unstable"] }
+tokio = { version = "1", features = ["full"] }
+log = "0.4"
+env_logger = "0.11"
+anyhow = "1"
