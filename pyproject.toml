@@ -1,10 +1,10 @@
 [build-system]
-requires = ["maturin>=1.7"]
-build-backend = "maturin"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "adamo"
-version = "0.2.0"
+version = "0.2.1"
 description = "Python SDK for Adamo — publish and subscribe to data through Adamo's global Zenoh infrastructure"
 requires-python = ">=3.10"
 license = "MIT"
@@ -19,11 +19,7 @@ ml = ["torch>=2", "av>=13", "numpy>=1.24"]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.25",
-    "maturin>=1.7",
 ]
 
-[tool.maturin]
-features = ["pyo3/extension-module"]
-manifest-path = "rust/Cargo.toml"
-module-name = "adamo._adamo_video"
-python-source = "src"
+[tool.hatch.build.targets.wheel]
+packages = ["src/adamo"]
