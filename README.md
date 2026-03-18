@@ -53,6 +53,48 @@ with session.subscribe("**") as sub:
         print(sample.key)
 ```
 
+## Video (Shared Memory)
+
+Stream video from any source via shared memory (iceoryx2). Your application writes raw frames into shared memory, and Adamo picks them up for hardware encoding and transport.
+
+```python
+from adamo._adamo_video import Robot
+
+robot = Robot(api_key="ak_...")
+robot.video(
+    name="camera",
+    encoder="nvv4l2h264enc",
+    source_type="shm",
+    shm_service="camera/video",
+    v4l2_capture_resolution=[1280, 720],
+    source_format="NV12",
+    fps=30,
+    bitrate=4000,
+)
+robot.run()  # blocks, streaming video
+```
+
+The publisher side uses iceoryx2 directly (Rust, C++, or Python):
+
+```python
+import iceoryx2 as iox2
+import numpy as np
+
+node = iox2.NodeBuilder().create(iox2.ServiceType.IPC)
+service = (
+    node.service_builder(iox2.ServiceName.new("camera/video"))
+    .publish_subscribe(bytes)
+    .open_or_create()
+)
+publisher = service.publisher_builder().create()
+
+# Publish a frame (raw pixels as bytes)
+frame = np.zeros((720, 1280, 3), dtype=np.uint8)  # RGB
+sample = publisher.loan_slice_uninit(frame.nbytes)
+sample.write_from_fn(lambda i: frame.flat[i])
+sample.send()
+```
+
 ## Data
 
 Download and analyze recorded sessions.
