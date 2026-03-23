@@ -32,12 +32,13 @@ Use `*` to match one level and `**` to match any depth:
 
 ## Teleoperation
 
-Connect to Adamo and stream data in real time.
+Connect to Adamo and stream data in real time. By default the SDK uses **QUIC** to reach the cloud router. You can pass `protocol="udp"` or `protocol="tcp"` when QUIC is unavailable or UDP is blocked on your network.
 
 ```python
 import adamo
 
 session = adamo.connect(api_key="ak_...")
+# session = adamo.connect(api_key="ak_...", protocol="udp")
 
 # Publish joint states from your robot
 session.put("arm-01/control/joint_states", payload)
