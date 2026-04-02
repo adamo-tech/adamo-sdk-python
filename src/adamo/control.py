@@ -11,5 +11,6 @@ _warnings.warn(
 from adamo.operate.control import (  # noqa: E402, F401
     JointState,
     Joy,
+    JoystickCommand,
     decode_control,
 )
