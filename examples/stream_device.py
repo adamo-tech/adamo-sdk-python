@@ -11,9 +11,7 @@ from adamo_video import Robot
 
 API_KEY = "ak_2M3T7rqPYGubJO2gBsxRoWswKn83z0L6"
 
-RELAY = "https://lhr.moq.adamohq.com/anon"
-
-robot = Robot(api_key=API_KEY, name="mac-test", relay=RELAY)
+robot = Robot(api_key=API_KEY, name="mac-test")
 robot.attach_video(
     "webcam",
     device="0",
