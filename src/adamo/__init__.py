@@ -1,7 +1,8 @@
 from adamo.operate import Session, connect, connect_async
 from adamo import operate
+from adamo.video import Robot, VideoTrack
 
-__all__ = ["Session", "connect", "connect_async", "operate", "data"]
+__all__ = ["Session", "connect", "connect_async", "operate", "data", "Robot", "VideoTrack"]
 
 
 def __getattr__(name: str):
