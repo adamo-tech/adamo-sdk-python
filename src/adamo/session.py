@@ -5,7 +5,7 @@ Adds ROS 2 topic support via rclpy (lazy import, not a hard dependency).
 """
 
 import threading
-from adamo_video import Robot as _RustRobot, VideoTrack
+from adamo._native import Robot as _RustRobot, VideoTrack
 
 
 class Robot:

@@ -9,7 +9,7 @@ Usage:
 """
 
 import cv2
-from adamo_video import Robot
+from adamo import Robot
 
 API_KEY = "ak_2M3T7rqPYGubJO2gBsxRoWswKn83z0L6"
 

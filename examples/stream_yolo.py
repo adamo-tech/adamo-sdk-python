@@ -11,7 +11,7 @@ Usage:
 import cv2
 import numpy as np
 from ultralytics import YOLO
-from adamo_video import Robot
+from adamo import Robot
 
 API_KEY = "ak_2M3T7rqPYGubJO2gBsxRoWswKn83z0L6"
 model = YOLO("yolov8n.pt")

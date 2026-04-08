@@ -11,7 +11,7 @@ Usage:
     python shm_stream.py
 """
 
-from adamo_video import Robot
+from adamo import Robot
 
 API_KEY = "ak_2M3T7rqPYGubJO2gBsxRoWswKn83z0L6"
 robot = Robot(api_key=API_KEY, name="mac-test")
