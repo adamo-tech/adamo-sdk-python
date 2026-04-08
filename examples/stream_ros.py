@@ -9,7 +9,7 @@ Usage:
     python stream_ros.py
 """
 
-from adamo.video import Robot
+from adamo.session import Robot
 
 API_KEY = "ak_2M3T7rqPYGubJO2gBsxRoWswKn83z0L6"
 
