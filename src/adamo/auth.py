@@ -1,4 +1,5 @@
 """Backward-compatibility stub — use ``adamo._auth`` directly."""
+from __future__ import annotations
 
 import warnings as _warnings
 

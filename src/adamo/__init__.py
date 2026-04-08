@@ -1,3 +1,4 @@
+from __future__ import annotations
 from adamo.session import Robot, VideoTrack
 
 __all__ = ["Robot", "VideoTrack", "data"]

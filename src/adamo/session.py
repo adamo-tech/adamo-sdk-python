@@ -3,6 +3,7 @@
 Thin Python wrapper around the native Rust adamo_video module.
 Adds ROS 2 topic support via rclpy (lazy import, not a hard dependency).
 """
+from __future__ import annotations
 
 import threading
 from adamo._native import Robot as _RustRobot, VideoTrack

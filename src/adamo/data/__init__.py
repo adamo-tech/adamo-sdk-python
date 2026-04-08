@@ -1,4 +1,5 @@
 """adamo.data — download and query recorded training data."""
+from __future__ import annotations
 
 from adamo._auth import API_BASE, STORE_BASE
 from adamo.data.client import DataClient

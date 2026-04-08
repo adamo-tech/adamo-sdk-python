@@ -1,4 +1,5 @@
 """Backward-compatibility stub — use ``adamo.operate.control`` instead."""
+from __future__ import annotations
 
 import warnings as _warnings
 
