@@ -1,7 +1,9 @@
 from __future__ import annotations
-from adamo.session import Robot, VideoTrack
 
-__all__ = ["Robot", "VideoTrack", "data"]
+from adamo.session import Robot, Participant, VideoTrack
+from adamo._native import DataTrack
+
+__all__ = ["Robot", "Participant", "VideoTrack", "DataTrack", "data"]
 
 
 def __getattr__(name: str):

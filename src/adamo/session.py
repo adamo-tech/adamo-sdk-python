@@ -1,22 +1,42 @@
-"""Adamo robot session — streams video and data via MoQ.
+"""Adamo participant session — streams video and data via MoQ.
 
-Thin Python wrapper around the native Rust adamo_video module.
+Thin Python wrapper around the native Rust adamo._native module.
 Adds ROS 2 topic support via rclpy (lazy import, not a hard dependency).
 """
 from __future__ import annotations
 
 import threading
-from adamo._native import Robot as _RustRobot, VideoTrack
+from typing import Callable
+from adamo._native import Robot as _RustRobot, VideoTrack, DataTrack
 
 
 class Robot:
-    """Adamo robot session — bidirectional video, data, and messaging via MoQ.
+    """Adamo participant session — bidirectional video, data, and messaging via MoQ.
+
+    Models a single participant on the MoQ network. A participant owns one
+    broadcast (named by ``name``) and can:
+
+    * publish video tracks (:meth:`attach_video` / :meth:`video`)
+    * publish named data tracks (:meth:`publish`) for low-latency control etc.
+    * subscribe to data tracks on other broadcasts (:meth:`subscribe`)
+    * send/receive opaque messages via the legacy ``send``/``on_message`` API
+
+    A leader rig (no cameras) uses only :meth:`publish`; a follower robot uses
+    :meth:`attach_video` + :meth:`subscribe`; a web-style viewer uses none of
+    these (the browser side uses ``@moq/watch``). The same class covers all
+    three roles — the role is defined by which methods you call.
 
     Wraps the native Rust Robot with Python-side ROS 2 support.
     """
 
-    def __init__(self, api_key: str, name: str | None = None, relay: str | None = None):
-        self._rust = _RustRobot(api_key=api_key, name=name, relay=relay)
+    def __init__(
+        self,
+        api_key: str,
+        name: str | None = None,
+        relay: str | None = None,
+        target: str | None = None,
+    ):
+        self._rust = _RustRobot(api_key=api_key, name=name, relay=relay, target=target)
         self._ros_threads: list[threading.Thread] = []
 
     def attach_video(
@@ -131,6 +151,62 @@ class Robot:
     def video(self, name: str, **kwargs) -> VideoTrack:
         return self._rust.video(name, **kwargs)
 
+    def publish(self, name: str, *, priority: int = 200) -> DataTrack:
+        """Publish a named data track on this participant's broadcast.
+
+        Returns a :class:`DataTrack` handle. Call ``.put(bytes)`` on the
+        handle to send frames. Each ``put()`` creates one MoQ group with
+        one frame, giving subscribers latest-wins semantics.
+
+        Priority is a 0-255 scale; higher = more important. Video defaults
+        to 1, legacy "data" track to 2. Use ``priority=250`` for control
+        commands so they drain ahead of video under congestion.
+
+        Must be called before the runtime starts (before any ``put()`` or
+        ``run()``).
+
+        Example — a GELLO leader rig with no cameras::
+
+            p = adamo.Participant(api_key=..., name="gello-01")
+            ctl = p.publish("control/joints", priority=250)
+            while True:
+                ctl.put(encode(read_encoders()))
+        """
+        return self._rust.publish(name, priority=priority)
+
+    def subscribe(
+        self,
+        broadcast: str,
+        track: str,
+        callback: Callable[[bytes], None],
+        *,
+        priority: int = 200,
+    ) -> None:
+        """Subscribe to a named track on another participant's broadcast.
+
+        ``broadcast`` is either a short name (``"gello-01"``) resolved
+        against the current organisation, or a fully-qualified path
+        (``"my-org/gello-01"``).
+
+        ``callback`` is called with each incoming payload as ``bytes`` on
+        a dedicated background thread. If the callback blocks, newer
+        frames are dropped (latest-wins).
+
+        Must be called before the runtime starts.
+
+        Example — a follower robot consuming leader commands::
+
+            p = adamo.Participant(api_key=..., name="robot-1")
+            p.attach_video("front", device="/dev/video0")
+
+            def on_joints(data):
+                apply_joints(decode(data))
+
+            p.subscribe("gello-01", "control/joints", on_joints)
+            p.run()
+        """
+        self._rust.subscribe(broadcast, track, callback, priority=priority)
+
     def send(self, channel: str, data) -> None:
         """Send data to viewers on a named channel."""
         self._rust.send(channel, data)
@@ -155,3 +231,9 @@ class Robot:
     def run(self) -> None:
         """Block until the session ends."""
         self._rust.run()
+
+
+# A Participant is just a Robot. The "Robot" name predates the abstraction;
+# for leader rigs, trainers, and generic peers, "Participant" reads better.
+# Both names point at the same class so existing code keeps working.
+Participant = Robot
