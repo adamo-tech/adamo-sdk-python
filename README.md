@@ -1,14 +1,20 @@
 # Adamo Python SDK
 
-Publish, subscribe, and analyze robot data through Adamo's global infrastructure.
+Publish, subscribe, and stream video through Adamo's global Zenoh network.
 
 ```
 pip install adamo
 ```
 
+The SDK has two faces: a **Zenoh Session** (`adamo.connect`) for data, control,
+and messaging, and a **Robot** (`adamo.Robot`) that adds video capture and
+hardware encoding.
+
 ## Topics
 
-All data flows through **topics** — slash-separated paths you define per robot. The SDK automatically scopes everything to your organization, so you only need to specify the path starting from the robot name:
+All data flows through **key expressions** — slash-separated paths you define
+per robot. The SDK automatically scopes everything to your organisation, so
+you only need to specify the path starting from the robot name:
 
 ```
 {robot_name}/{category}/{stream}
@@ -30,77 +36,171 @@ Use `*` to match one level and `**` to match any depth:
 - `arm-01/**` — everything from arm-01
 - `*/video/**` — all video from any robot
 
-## Teleoperation
-
-Connect to Adamo and stream data in real time.
+## Pub/Sub
 
 ```python
 import adamo
 
 session = adamo.connect(api_key="ak_...")
 
-# Publish joint states from your robot
+# One-shot put
 session.put("arm-01/control/joint_states", payload)
 
-# Subscribe to a specific robot's sensors
+# Persistent publisher (higher throughput for repeated puts)
+with session.publisher("arm-01/sensors/imu", express=True) as pub:
+    pub.put(b"...")
+
+# Subscribe — iterator
 with session.subscribe("arm-01/sensors/**") as sub:
     for sample in sub:
         print(sample.key, len(sample.payload))
 
-# Subscribe to all robots in your org
-with session.subscribe("**") as sub:
-    for sample in sub:
-        print(sample.key)
+# Subscribe — callback
+sub = session.subscribe("**", callback=lambda s: print(s.key))
+
+# One-shot query
+for sample in session.get("arm-01/config/**"):
+    print(sample.key, sample.payload)
 ```
 
-## Video (Shared Memory)
+## Liveliness
 
-Stream video from any source via shared memory (iceoryx2). Your application writes raw frames into shared memory, and Adamo picks them up for hardware encoding and transport.
+Discover which robots are online and watch for joins/leaves in real time —
+native Zenoh primitive, no polling required.
 
 ```python
-from adamo._adamo_video import Robot
+session = adamo.connect(api_key="ak_...")
 
-robot = Robot(api_key="ak_...")
-robot.video(
-    name="camera",
-    encoder="nvv4l2h264enc",
-    source_type="shm",
-    shm_service="camera/video",
-    v4l2_capture_resolution=[1280, 720],
-    source_format="NV12",
-    fps=30,
-    bitrate=4000,
+# Declare this client as alive
+token = session.alive("my-robot")
+
+# Query currently alive participants
+print(session.live_tokens())
+
+# Watch for changes
+session.on_liveliness(
+    callback=lambda key, is_alive: print(f"{'UP' if is_alive else 'DOWN'}: {key}")
 )
+```
+
+## Video — Rust-driven capture
+
+Use `Robot` when you want Adamo to own the camera. Rust reads from the source,
+the hardware encoder produces H.264/H.265/AV1, and Zenoh carries it out.
+
+```python
+import adamo
+
+robot = adamo.Robot(api_key="ak_...", name="arm-01")
+
+# V4L2 device capture
+robot.attach_video("webcam", device="0", width=1280, height=720, fps=30, bitrate_kbps=4000)
+
+# iceoryx2 shared memory (another process publishes raw frames)
+robot.attach_video("front", shm="camera/front", width=1280, height=720, fps=30)
+
+# ROS 2 sensor_msgs/Image topic (rclpy bridge)
+robot.attach_video("head", ros="/camera/image_raw", width=1280, height=720, fps=30)
+
 robot.run()  # blocks, streaming video
 ```
 
-The publisher side uses iceoryx2 directly (Rust, C++, or Python):
+## Video — Python-driven frames
+
+Use `robot.video(...)` when your code owns the frame loop — perception pipelines,
+OpenCV, PyTorch overlays, etc. Frames cross into the Rust encoder via iceoryx2
+shared memory (zero-copy, same host) and go straight to Zenoh.
+
+```
+pip install 'adamo[video]'  # adds iceoryx2 + numpy
+```
 
 ```python
-import iceoryx2 as iox2
-import numpy as np
+import cv2
+import adamo
 
-node = iox2.NodeBuilder().create(iox2.ServiceType.IPC)
-service = (
-    node.service_builder(iox2.ServiceName.new("camera/video"))
-    .publish_subscribe(bytes)
-    .open_or_create()
-)
-publisher = service.publisher_builder().create()
+robot = adamo.Robot(api_key="ak_...", name="arm-01")
+track = robot.video("webcam", width=1280, height=720, pixel_format="BGRA",
+                    fps=30, bitrate_kbps=4000)
 
-# Publish a frame (raw pixels as bytes)
-frame = np.zeros((720, 1280, 3), dtype=np.uint8)  # RGB
-sample = publisher.loan_slice_uninit(frame.nbytes)
-sample.write_from_fn(lambda i: frame.flat[i])
-sample.send()
+cap = cv2.VideoCapture(0)
+while True:
+    ok, frame = cap.read()
+    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2BGRA)
+    track.send(frame)
+```
+
+The Rust pipeline auto-starts on the first frame; if you call
+`robot.run()` it blocks instead.
+
+## Control tracks — low-latency, priority-aware
+
+For teleop/control, declare per-track publishers with high priority so they
+drain ahead of video under congestion.
+
+```python
+robot = adamo.Robot(api_key="ak_...", name="gello-01")
+ctl = robot.publish("control/joints", priority=250)  # 0-255, higher = more important
+
+while True:
+    ctl.put(encode(read_encoders()))
+```
+
+Consume control on a follower robot:
+
+```python
+robot = adamo.Robot(api_key="ak_...", name="arm-01")
+robot.attach_video("front", device="0")
+
+def on_joints(payload: bytes):
+    apply_joints(decode(payload))
+
+robot.subscribe("gello-01", "control/joints", on_joints, priority=250)
+robot.run()
+```
+
+## Typed control messages
+
+Built-in JSON-encoded message types mirror common ROS messages:
+
+```python
+from adamo.operate.control import JointState, Joy, JoystickCommand, decode_control
+
+ctl.put(JointState(names=["j1", "j2"], positions=[0.1, 0.2]).to_json())
+
+for sample in sub:
+    msg = decode_control(sample.payload)
+    if isinstance(msg, JointState):
+        ...
+```
+
+## Messaging (send / recv / on_message)
+
+For back-channel messages from viewers (e.g. a web UI) to the robot:
+
+```python
+robot = adamo.Robot(api_key="ak_...", name="arm-01")
+
+@robot.on_message
+def handle(channel, data):
+    if channel == "teleop":
+        cmd = json.loads(data)
+
+robot.run()
+```
+
+Publishing side:
+
+```python
+robot.send("teleop", b'{"action": "stop"}')
 ```
 
 ## Data
 
-Download and analyze recorded sessions.
+Download and analyse recorded sessions.
 
 ```
-pip install adamo[data]
+pip install 'adamo[data]'
 ```
 
 ```python
@@ -125,7 +225,7 @@ client.download_video(s.id, "arm-01/video/main", "video.mp4")
 ## PyTorch Dataset
 
 ```
-pip install adamo[ml]
+pip install 'adamo[ml]'
 ```
 
 ```python
@@ -138,4 +238,15 @@ dataset = client.dataset(
     action=("arm-01/control/joint_states", "positions"),
     hz=30,
 )
+```
+
+## Transport
+
+The SDK connects to the nearest Adamo Zenoh router automatically. The default
+is UDP; pass `protocol="quic"` for reliable streams or `protocol="tcp"` for
+environments that block UDP.
+
+```python
+adamo.connect(api_key="ak_...", protocol="quic")
+adamo.Robot(api_key="ak_...", name="arm-01", protocol="udp")
 ```
