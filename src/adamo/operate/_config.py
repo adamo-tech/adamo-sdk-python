@@ -38,11 +38,11 @@ def _endpoint_for_protocol(info: ConnectionInfo, protocol: str) -> str:
         return info.udp_endpoint
     if protocol == "tcp":
         return info.udp_endpoint.replace("udp/", "tcp/", 1)
-    # Default: QUIC with datagram mode
+    # Default: QUIC reliable streams
     ep = info.quic_endpoint
-    if ep.startswith("quic/") and "?rel=0" not in ep:
-        return f"{ep}?rel=0"
-    return ep
+    if ep.startswith("quic/") and "?rel=" not in ep:
+        return f"{ep}?rel=1"
+    return ep.replace("?rel=0", "?rel=1")
 
 
 def connect(
