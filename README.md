@@ -6,6 +6,19 @@ Publish, subscribe, and stream video through Adamo's global Zenoh network.
 pip install adamo
 ```
 
+Pre-built wheels cover Linux x86_64, Linux aarch64 (glibc ≥ 2.28, i.e.
+Ubuntu 20.04 / RHEL 8 / Debian 11 and newer), and macOS arm64. No source
+build is needed on any supported platform.
+
+On Ubuntu 20.04 the system `python3-pip` is 20.0.2, which predates
+`manylinux_2_28` tag support — upgrade pip first or our wheels will
+look incompatible:
+
+```
+python3 -m pip install --upgrade pip
+python3 -m pip install adamo
+```
+
 The SDK has two faces: a **Zenoh Session** (`adamo.connect`) for data, control,
 and messaging, and a **Robot** (`adamo.Robot`) that adds video capture and
 hardware encoding.
@@ -243,10 +256,11 @@ dataset = client.dataset(
 ## Transport
 
 The SDK connects to the nearest Adamo Zenoh router automatically. The default
-is UDP; pass `protocol="quic"` for reliable streams or `protocol="tcp"` for
-environments that block UDP.
+is QUIC (reliable streams over a single multiplexed UDP socket); pass
+`protocol="udp"` for the lowest-latency unreliable transport or
+`protocol="tcp"` for environments that block UDP/QUIC.
 
 ```python
-adamo.connect(api_key="ak_...", protocol="quic")
+adamo.connect(api_key="ak_...")                         # quic
 adamo.Robot(api_key="ak_...", name="arm-01", protocol="udp")
 ```

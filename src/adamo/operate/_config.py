@@ -18,12 +18,12 @@ from adamo.operate.session import Session
 DEFAULT_API_URL = "https://q14iirks46.execute-api.eu-west-2.amazonaws.com"
 
 
-def _build_zenoh_config(info: ConnectionInfo, protocol: str = "udp") -> zenoh.Config:
+def _build_zenoh_config(info: ConnectionInfo, protocol: str = "quic") -> zenoh.Config:
     """Build a Zenoh Config targeting the Adamo router.
 
     Args:
         info: Connection info from the API.
-        protocol: Transport protocol — ``"udp"`` (default), ``"quic"``, or ``"tcp"``.
+        protocol: Transport protocol — ``"quic"`` (default), ``"udp"``, or ``"tcp"``.
     """
     endpoint = _endpoint_for_protocol(info, protocol)
     config = zenoh.Config()
@@ -38,7 +38,7 @@ def _endpoint_for_protocol(info: ConnectionInfo, protocol: str) -> str:
         return info.udp_endpoint
     if protocol == "tcp":
         return info.udp_endpoint.replace("udp/", "tcp/", 1)
-    # Default: QUIC reliable streams
+    # QUIC (default): reliable streams
     ep = info.quic_endpoint
     if ep.startswith("quic/") and "?rel=" not in ep:
         return f"{ep}?rel=1"
@@ -51,7 +51,7 @@ def connect(
     token: str | None = None,
     org_id: str | None = None,
     api_url: str = DEFAULT_API_URL,
-    protocol: str = "udp",
+    protocol: str = "quic",
 ) -> Session:
     """Connect to Adamo and return a Session.
 
@@ -62,7 +62,7 @@ def connect(
         token: A Supabase JWT token. Used for user-authenticated sessions.
         org_id: Organization ID (only used with ``token``).
         api_url: Override the Adamo API base URL.
-        protocol: Transport protocol — ``"udp"`` (default), ``"quic"``, or ``"tcp"``.
+        protocol: Transport protocol — ``"quic"`` (default), ``"udp"``, or ``"tcp"``.
 
     Returns:
         A connected :class:`Session`.
@@ -79,7 +79,7 @@ async def connect_async(
     token: str | None = None,
     org_id: str | None = None,
     api_url: str = DEFAULT_API_URL,
-    protocol: str = "udp",
+    protocol: str = "quic",
 ) -> Session:
     """Async version of :func:`connect`.
 

@@ -95,7 +95,7 @@ class Robot:
         Override the Zenoh router endpoint. When omitted, the best router
         for your org is chosen by the Adamo API.
     protocol:
-        ``"udp"`` (default), ``"quic"``, or ``"tcp"``.
+        ``"quic"`` (default), ``"udp"``, or ``"tcp"``.
     """
 
     def __init__(
@@ -103,7 +103,7 @@ class Robot:
         api_key: str | None = None,
         name: str | None = None,
         relay: str | None = None,
-        protocol: str = "udp",
+        protocol: str = "quic",
     ):
         self._api_key = api_key
         self._name = name
