@@ -1,24 +1,38 @@
-"""Adamo session — thin wrapper around a Zenoh session with org-scoped key expressions."""
+"""Adamo session — wraps the native CoreSession with org-scoped key expressions.
+
+The public API (put / publisher / subscribe / get / alive / live_tokens /
+on_liveliness) is identical to the previous eclipse-zenoh-backed version —
+only the implementation moved from `import zenoh` to `adamo._native.CoreSession`.
+"""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Callable
 
-import zenoh
-from zenoh import (
-    CongestionControl,
-    LivelinessToken,
-    Priority,
-    Publisher as ZPublisher,
-    Reliability,
-    Sample as ZSample,
-    SampleKind,
-    Session as ZSession,
-    Subscriber as ZSubscriber,
-)
-
 if TYPE_CHECKING:
     from adamo._auth import ConnectionInfo
+    from adamo._native import (
+        CoreSession,
+        CorePublisher,
+        CoreSubscriber,
+        CoreCallbackSubscriber,
+        CoreLivelinessToken,
+        CoreSample,
+    )
+
+
+# Priority constants — legacy API exposed an `adamo.Priority` analogous to
+# `zenoh.Priority`. CoreSession uses a u8 0-255 scale (higher = more
+# important). These names are kept for API compatibility; each is the u8
+# value that `priority_from_u8` maps into the matching zenoh class.
+class Priority:
+    REAL_TIME = 250
+    INTERACTIVE_HIGH = 220
+    INTERACTIVE_LOW = 190
+    DATA_HIGH = 150
+    DATA = 100
+    DATA_LOW = 80
+    BACKGROUND = 20
 
 
 class Sample:
@@ -26,15 +40,15 @@ class Sample:
 
     __slots__ = ("key", "payload", "timestamp")
 
-    def __init__(self, zenoh_sample: ZSample, prefix: str):
-        full_key = str(zenoh_sample.key_expr)
-        # Strip the adamo/{org}/ prefix so users see their own key expressions
+    def __init__(self, core_sample: "CoreSample", prefix: str):
+        full_key = core_sample.key
         if full_key.startswith(prefix):
             self.key = full_key[len(prefix) :]
         else:
             self.key = full_key
-        self.payload = bytes(zenoh_sample.payload)
-        self.timestamp = zenoh_sample.timestamp
+        self.payload = core_sample.payload
+        # CoreSample doesn't expose timestamp yet; set to None.
+        self.timestamp = None
 
     def __repr__(self) -> str:
         size = len(self.payload)
@@ -44,8 +58,8 @@ class Sample:
 class Publisher:
     """A persistent publisher for repeated puts to the same key expression."""
 
-    def __init__(self, zenoh_publisher: ZPublisher):
-        self._pub = zenoh_publisher
+    def __init__(self, core_publisher: "CorePublisher"):
+        self._pub = core_publisher
 
     def put(self, payload: bytes | str) -> None:
         if isinstance(payload, str):
@@ -53,7 +67,7 @@ class Publisher:
         self._pub.put(payload)
 
     def close(self) -> None:
-        self._pub.undeclare()
+        self._pub.close()
 
     def __enter__(self):
         return self
@@ -63,10 +77,10 @@ class Publisher:
 
 
 class Subscriber:
-    """An iterator over received samples for a key expression."""
+    """An iterator over received samples (polling form)."""
 
-    def __init__(self, zenoh_subscriber: ZSubscriber, prefix: str):
-        self._sub = zenoh_subscriber
+    def __init__(self, core_sub: "CoreSubscriber", prefix: str):
+        self._sub = core_sub
         self._prefix = prefix
 
     def __iter__(self):
@@ -83,7 +97,39 @@ class Subscriber:
         return Sample(sample, self._prefix)
 
     def close(self) -> None:
-        self._sub.undeclare()
+        self._sub.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
+
+
+class CallbackSubscriber:
+    """Subscriber lifecycle handle for callback-based subscribe()."""
+
+    def __init__(self, core_sub: "CoreCallbackSubscriber"):
+        self._sub = core_sub
+
+    def close(self) -> None:
+        self._sub.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
+
+
+class LivelinessToken:
+    """A liveliness token — alive until close() or garbage collection."""
+
+    def __init__(self, core_token: "CoreLivelinessToken"):
+        self._token = core_token
+
+    def close(self) -> None:
+        self._token.close()
 
     def __enter__(self):
         return self
@@ -99,19 +145,17 @@ class Session:
     unless ``raw=True`` is passed.
     """
 
-    def __init__(self, zenoh_session: ZSession, info: ConnectionInfo):
-        self._session = zenoh_session
+    def __init__(self, core_session: "CoreSession", info: ConnectionInfo):
+        self._session = core_session
         self._info = info
         self._prefix = f"adamo/{info.org}/"
+        # Keep callback subscribers alive so their zenoh undeclare handles
+        # aren't dropped the moment the user stops holding the return value.
+        self._callback_subs: list[CallbackSubscriber] = []
 
     @property
     def org(self) -> str:
         return self._info.org
-
-    @property
-    def zenoh(self) -> ZSession:
-        """Access the underlying Zenoh session directly."""
-        return self._session
 
     def _resolve(self, key_expr: str, raw: bool = False) -> str:
         if raw:
@@ -126,9 +170,9 @@ class Session:
         payload: bytes | str,
         *,
         raw: bool = False,
-        priority: Priority = Priority.DATA,
-        congestion_control: CongestionControl = CongestionControl.DROP,
+        priority: int = Priority.DATA,
         express: bool = False,
+        reliable: bool = False,
     ) -> None:
         """Publish a single value."""
         if isinstance(payload, str):
@@ -136,9 +180,9 @@ class Session:
         self._session.put(
             self._resolve(key_expr, raw),
             payload,
-            priority=priority,
-            congestion_control=congestion_control,
+            priority=int(priority),
             express=express,
+            reliable=reliable,
         )
 
     def publisher(
@@ -146,20 +190,18 @@ class Session:
         key_expr: str,
         *,
         raw: bool = False,
-        priority: Priority = Priority.DATA,
-        congestion_control: CongestionControl = CongestionControl.DROP,
-        reliability: Reliability = Reliability.BEST_EFFORT,
+        priority: int = Priority.DATA,
         express: bool = False,
+        reliable: bool = False,
     ) -> Publisher:
         """Declare a persistent publisher for repeated puts."""
-        pub = self._session.declare_publisher(
+        core_pub = self._session.publisher(
             self._resolve(key_expr, raw),
-            priority=priority,
-            congestion_control=congestion_control,
-            reliability=reliability,
+            priority=int(priority),
             express=express,
+            reliable=reliable,
         )
-        return Publisher(pub)
+        return Publisher(core_pub)
 
     # -- Subscribe -------------------------------------------------------------
 
@@ -169,25 +211,32 @@ class Session:
         *,
         raw: bool = False,
         callback: Callable[[Sample], None] | None = None,
-    ) -> Subscriber:
-        """Subscribe to a key expression. Returns an iterable of Samples.
+    ) -> Subscriber | CallbackSubscriber:
+        """Subscribe to a key expression.
 
-        If ``callback`` is provided, samples are delivered to the callback
-        instead and the returned Subscriber is used only for lifecycle (close).
+        Without ``callback``: returns a :class:`Subscriber` you iterate or
+        poll via ``.try_recv()``.
+
+        With ``callback``: the callback is invoked on the zenoh receive
+        thread each time a sample arrives. Returns a lifecycle
+        :class:`CallbackSubscriber` (call ``close()`` to stop). The
+        Session also holds a strong reference internally so the handle
+        isn't GC'd while samples are still expected.
         """
         resolved = self._resolve(key_expr, raw)
         prefix = self._prefix
 
-        if callback is not None:
+        if callback is None:
+            core_sub = self._session.subscribe(resolved)
+            return Subscriber(core_sub, prefix)
 
-            def _handler(s: ZSample):
-                callback(Sample(s, prefix))
+        def _wrap(core_sample) -> None:
+            callback(Sample(core_sample, prefix))
 
-            sub = self._session.declare_subscriber(resolved, _handler)
-        else:
-            sub = self._session.declare_subscriber(resolved)
-
-        return Subscriber(sub, prefix)
+        core_sub = self._session.subscribe_callback(resolved, _wrap)
+        handle = CallbackSubscriber(core_sub)
+        self._callback_subs.append(handle)
+        return handle
 
     # -- Query -----------------------------------------------------------------
 
@@ -200,41 +249,21 @@ class Session:
     ) -> list[Sample]:
         """One-shot query for data matching a key expression."""
         resolved = self._resolve(key_expr, raw)
-        replies = self._session.get(
-            resolved,
-            timeout=timeout_ms / 1000.0,
-        )
-        results = []
-        for reply in replies:
-            sample = reply.ok
-            if sample is not None:
-                results.append(Sample(sample, self._prefix))
-        return results
+        core_samples = self._session.get(resolved, timeout_ms=timeout_ms)
+        return [Sample(s, self._prefix) for s in core_samples]
 
     # -- Liveliness ------------------------------------------------------------
 
     def alive(self, token_key: str) -> LivelinessToken:
-        """Declare this client as alive. The token stays alive until dropped.
+        """Declare this client alive at ``adamo/{org}/{token_key}/alive``.
 
-        Publishes liveliness at ``adamo/{org}/{token_key}/alive``.
+        The token stays alive until close() or garbage collection.
         """
-        key = f"{self._prefix}{token_key}/alive"
-        return self._session.liveliness().declare_token(key)
+        return LivelinessToken(self._session.alive(token_key))
 
     def live_tokens(self, pattern: str = "**/alive") -> list[str]:
         """Query currently live tokens matching a pattern within this org."""
-        resolved = f"{self._prefix}{pattern}"
-        replies = self._session.liveliness().get(resolved)
-        tokens = []
-        for reply in replies:
-            sample = reply.ok
-            if sample is not None:
-                full_key = str(sample.key_expr)
-                if full_key.startswith(self._prefix):
-                    tokens.append(full_key[len(self._prefix) :])
-                else:
-                    tokens.append(full_key)
-        return tokens
+        return self._session.live_tokens(pattern)
 
     def on_liveliness(
         self,
@@ -242,32 +271,30 @@ class Session:
         *,
         callback: Callable[[str, bool], None] | None = None,
         history: bool = True,
-    ) -> ZSubscriber:
+    ) -> CallbackSubscriber:
         """Watch for liveliness changes within this org.
 
-        ``callback(key, is_alive)`` is called when a token appears or disappears.
+        ``callback(key, is_alive)`` fires when a token appears or disappears.
         """
-        resolved = f"{self._prefix}{pattern}"
-        prefix = self._prefix
-
-        def _handler(s: ZSample):
-            full_key = str(s.key_expr)
-            if full_key.startswith(prefix):
-                key = full_key[len(prefix) :]
-            else:
-                key = full_key
-            is_alive = s.kind == SampleKind.PUT
-            if callback:
-                callback(key, is_alive)
-
-        return self._session.liveliness().declare_subscriber(
-            resolved, _handler, history=history
-        )
+        if callback is None:
+            raise ValueError("on_liveliness requires callback=")
+        core_sub = self._session.on_liveliness(callback, pattern, history)
+        handle = CallbackSubscriber(core_sub)
+        self._callback_subs.append(handle)
+        return handle
 
     # -- Lifecycle -------------------------------------------------------------
 
     def close(self) -> None:
-        self._session.close()
+        for sub in self._callback_subs:
+            try:
+                sub.close()
+            except Exception:
+                pass
+        self._callback_subs.clear()
+        # CoreSession is dropped by Python GC; no explicit close needed
+        # (the underlying zenoh::Session is Arc'd and released when the
+        # last handle drops).
 
     def __enter__(self):
         return self

@@ -398,29 +398,21 @@ class Robot:
         express: bool = False,
         reliable: bool = False,
     ) -> "Publisher":
-        """Declare a Zenoh publisher for a named track under this participant.
+        """Declare a publisher for a named track under this participant.
 
         The key expression is ``adamo/{org}/{name}/{track}``. ``priority``
         is a 0-255 scale (higher = more important) and is mapped to one of
-        Zenoh's 8 priority classes. Use ``priority=250`` for control
-        commands so they drain ahead of video under congestion.
+        zenoh's 8 priority classes in Rust. Use ``priority=250`` for
+        control commands so they drain ahead of video under congestion.
         """
-        from adamo.operate.session import Publisher as _OpPublisher
-        import zenoh
-
         full_key = self._scoped_key(track)
-        zpub = self.session.zenoh.declare_publisher(
+        pub = self.session.publisher(
             full_key,
-            priority=_to_zenoh_priority(priority),
-            congestion_control=zenoh.CongestionControl.DROP,
-            reliability=(
-                zenoh.Reliability.RELIABLE
-                if reliable
-                else zenoh.Reliability.BEST_EFFORT
-            ),
+            raw=True,
+            priority=priority,
             express=express,
+            reliable=reliable,
         )
-        pub = _OpPublisher(zpub)
         self._publishers[full_key] = pub
         return pub
 
@@ -472,12 +464,12 @@ class Robot:
                 _captures=capture_names,
                 _wanted=wanted,
             ):
-                payload = bytes(sample.payload)
+                # sample is adamo.operate.Sample (already prefix-stripped)
+                payload = sample.payload
                 if not _wanted:
                     _cb(payload)
                     return
-                # Extract captures from the trailing segments of the sample key.
-                segs = str(sample.key_expr).split("/")
+                segs = sample.key.split("/")
                 kwargs = {
                     name: segs[-len(_captures) + i]
                     for i, name in enumerate(_captures)
@@ -485,7 +477,7 @@ class Robot:
                 }
                 _cb(payload, **kwargs)
 
-            sub = self.session.zenoh.declare_subscriber(key, _handler)
+            sub = self.session.subscribe(key, raw=True, callback=_handler)
             self._subscribers.append(sub)
         return callback
 
@@ -548,7 +540,7 @@ class Robot:
         if isinstance(data, str):
             data = data.encode()
         key = self._scoped_key(f"{self._msg_channel_prefix}/{channel}")
-        self.session.zenoh.put(key, data)
+        self.session.put(key, data, raw=True)
 
     def recv(self, timeout: float | None = None) -> tuple[str, bytes]:
         """Block until a message arrives from any viewer. Returns (channel, data)."""
@@ -575,13 +567,19 @@ class Robot:
         if self._messages_sub is not None:
             return
         session = self.session
-        prefix = self._scoped_key(f"{self._msg_channel_prefix}/")
-        key = f"{prefix}**"
+        full_prefix = self._scoped_key(f"{self._msg_channel_prefix}/")
+        key = f"{full_prefix}**"
+        # Session.Sample strips the session's adamo/{org}/ prefix, leaving
+        # `{name}/msg/{channel}`. Strip that shorter prefix here.
+        short_prefix = f"{self._name}/{self._msg_channel_prefix}/"
 
         def _handler(sample):
-            full = str(sample.key_expr)
-            channel = full[len(prefix):] if full.startswith(prefix) else full
-            payload = bytes(sample.payload)
+            stripped = sample.key
+            if stripped.startswith(short_prefix):
+                channel = stripped[len(short_prefix):]
+            else:
+                channel = stripped
+            payload = sample.payload
             with self._msg_cond:
                 self._msg_queue.append((channel, payload))
                 self._msg_cond.notify()
@@ -591,7 +589,7 @@ class Robot:
                 except Exception:
                     pass
 
-        self._messages_sub = session.zenoh.declare_subscriber(key, _handler)
+        self._messages_sub = session.subscribe(key, raw=True, callback=_handler)
 
     # -- Keyspace helpers ------------------------------------------------------
 
@@ -636,13 +634,13 @@ class Robot:
     def close(self) -> None:
         for sub in self._subscribers:
             try:
-                sub.undeclare()
+                sub.close()
             except Exception:
                 pass
         self._subscribers.clear()
         if self._messages_sub is not None:
             try:
-                self._messages_sub.undeclare()
+                self._messages_sub.close()
             except Exception:
                 pass
             self._messages_sub = None
@@ -672,32 +670,7 @@ class Robot:
         self.close()
 
 
-# -- Priority mapping ---------------------------------------------------------
-
-def _to_zenoh_priority(priority: int):
-    """Map a 0-255 priority into one of Zenoh's 8 priority classes."""
-    import zenoh
-
-    # Clamp
-    p = max(0, min(255, int(priority)))
-
-    # Zenoh priorities (higher-numbered enum = lower priority in some versions,
-    # so use the named constants directly). Higher input = more important.
-    if p >= 240:
-        return zenoh.Priority.REAL_TIME
-    if p >= 210:
-        return zenoh.Priority.INTERACTIVE_HIGH
-    if p >= 180:
-        return zenoh.Priority.INTERACTIVE_LOW
-    if p >= 140:
-        return zenoh.Priority.DATA_HIGH
-    if p >= 100:
-        return zenoh.Priority.DATA
-    if p >= 60:
-        return zenoh.Priority.DATA_LOW
-    return zenoh.Priority.BACKGROUND
-
-
 # A Participant is just a Robot — "Participant" reads better for leader rigs
-# and trainers that have no cameras.
+# and trainers that have no cameras. The 0-255 priority scale is mapped into
+# zenoh's 8 priority classes by `priority_from_u8` on the Rust side.
 Participant = Robot

@@ -1,10 +1,6 @@
-"""Connect to Adamo — authenticate and open a Zenoh session."""
+"""Connect to Adamo — authenticate and open a Zenoh session via _native."""
 
 from __future__ import annotations
-
-import json
-
-import zenoh
 
 from adamo._auth import (
     ConnectionInfo,
@@ -13,36 +9,10 @@ from adamo._auth import (
     fetch_config_token,
     fetch_config_token_async,
 )
+from adamo._native import open_core
 from adamo.operate.session import Session
 
 DEFAULT_API_URL = "https://q14iirks46.execute-api.eu-west-2.amazonaws.com"
-
-
-def _build_zenoh_config(info: ConnectionInfo, protocol: str = "quic") -> zenoh.Config:
-    """Build a Zenoh Config targeting the Adamo router.
-
-    Args:
-        info: Connection info from the API.
-        protocol: Transport protocol — ``"quic"`` (default), ``"udp"``, or ``"tcp"``.
-    """
-    endpoint = _endpoint_for_protocol(info, protocol)
-    config = zenoh.Config()
-    config.insert_json5("mode", json.dumps("client"))
-    config.insert_json5("connect/endpoints", json.dumps([endpoint]))
-    return config
-
-
-def _endpoint_for_protocol(info: ConnectionInfo, protocol: str) -> str:
-    """Select the Zenoh endpoint URL for a given protocol."""
-    if protocol == "udp":
-        return info.udp_endpoint
-    if protocol == "tcp":
-        return info.udp_endpoint.replace("udp/", "tcp/", 1)
-    # QUIC (default): reliable streams
-    ep = info.quic_endpoint
-    if ep.startswith("quic/") and "?rel=" not in ep:
-        return f"{ep}?rel=1"
-    return ep.replace("?rel=0", "?rel=1")
 
 
 def connect(
@@ -68,9 +38,16 @@ def connect(
         A connected :class:`Session`.
     """
     info = _resolve_auth(api_key=api_key, token=token, org_id=org_id, api_url=api_url)
-    config = _build_zenoh_config(info, protocol=protocol)
-    zenoh_session = zenoh.open(config)
-    return Session(zenoh_session, info)
+    # open_core takes the api_key and handles API lookup + zenoh config in Rust.
+    # For token-auth users we fall back to api_key-style if present, otherwise
+    # this path doesn't currently support tokens end-to-end; token users must
+    # go through fetch_config_token to resolve an effective api_key upstream.
+    if api_key is None:
+        raise NotImplementedError(
+            "token-based connect via _native is not yet wired; pass api_key= for now"
+        )
+    core = open_core(api_key, protocol)
+    return Session(core, info)
 
 
 async def connect_async(
@@ -83,15 +60,18 @@ async def connect_async(
 ) -> Session:
     """Async version of :func:`connect`.
 
-    The Zenoh session itself is synchronous (the Python binding doesn't expose
-    an async open), but the API config fetch is done asynchronously.
+    The zenoh session itself opens synchronously inside _native; only the API
+    config fetch runs asynchronously.
     """
     info = await _resolve_auth_async(
         api_key=api_key, token=token, org_id=org_id, api_url=api_url
     )
-    config = _build_zenoh_config(info, protocol=protocol)
-    zenoh_session = zenoh.open(config)
-    return Session(zenoh_session, info)
+    if api_key is None:
+        raise NotImplementedError(
+            "token-based connect via _native is not yet wired; pass api_key= for now"
+        )
+    core = open_core(api_key, protocol)
+    return Session(core, info)
 
 
 def _resolve_auth(
