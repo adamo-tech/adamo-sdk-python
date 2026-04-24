@@ -4,18 +4,13 @@ build-backend = "maturin"
 
 [project]
 name = "adamo"
-version = "0.4.15"
+version = "0.4.14"
 description = "Python SDK for Adamo — stream video and data via Zenoh"
 requires-python = ">=3.8"
 license = "MIT"
 dependencies = [
     "httpx>=0.28",
-    # Pinned to 1.8.0: only zenoh release with both cp38 (Ubuntu 20.04's
-    # Python 3.8, x86_64) and cp39-abi3 (everything else) wheels. 1.7.0+
-    # dropped cp38, 1.9.0 is cp39-only — either breaks `pip install` on
-    # stock Ubuntu 20.04 because old pip falls through to the sdist and
-    # hits `puccinialin` unresolvable.
-    "eclipse-zenoh==1.8.0",
+    "eclipse-zenoh>=1.7",
 ]
 
 [project.optional-dependencies]
