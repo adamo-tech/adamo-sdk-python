@@ -89,8 +89,7 @@ class Robot:
         Adamo API key (``ak_...``). Fetches org-scoped Zenoh endpoints from
         the Adamo API.
     name:
-        Short robot/participant name. Becomes the second segment of the
-        Zenoh key space (``adamo/{org}/{name}/...``).
+        Short robot/participant name.
     relay:
         Override the Zenoh router endpoint. When omitted, the best router
         for your org is chosen by the Adamo API.
@@ -400,10 +399,10 @@ class Robot:
     ) -> "Publisher":
         """Declare a publisher for a named track under this participant.
 
-        The key expression is ``adamo/{org}/{name}/{track}``. ``priority``
-        is a 0-255 scale (higher = more important) and is mapped to one of
-        zenoh's 8 priority classes in Rust. Use ``priority=250`` for
-        control commands so they drain ahead of video under congestion.
+        ``priority`` is a 0-255 scale (higher = more important) and is
+        mapped to one of zenoh's 8 priority classes in Rust. Use
+        ``priority=250`` for control commands so they drain ahead of
+        video under congestion.
         """
         full_key = self._scoped_key(track)
         pub = self.session.publisher(
@@ -464,7 +463,7 @@ class Robot:
                 _captures=capture_names,
                 _wanted=wanted,
             ):
-                # sample is adamo.operate.Sample (already prefix-stripped)
+                # sample is adamo.operate.Sample
                 payload = sample.payload
                 if not _wanted:
                     _cb(payload)
@@ -530,13 +529,49 @@ class Robot:
 
         return _wrap
 
+    # -- Logging ----------------------------------------------------------------
+
+    def log(self, message: str, *, level: str = "info") -> None:
+        """Publish a log line from this robot.
+
+        The payload is a single-line JSON object ``{"ts_us", "level",
+        "message"}`` using fabric time (synchronised with every other
+        node on the network). Frontends subscribe to this stream and
+        render the logs in their console.
+        """
+        import json as _json
+
+        from adamo._native import fabric_now_us
+
+        text = str(message)
+        if len(text) > 10_000:
+            text = text[:10_000] + "... [truncated]"
+        payload = _json.dumps(
+            {
+                "ts_us": fabric_now_us(),
+                "level": str(level).lower(),
+                "message": text,
+            },
+            separators=(",", ":"),
+        ).encode()
+        from adamo.operate.session import Priority
+
+        key = f"{self._name}/logs"
+        pub = self._publishers.get(key)
+        if pub is None:
+            pub = self.session.publisher(
+                key,
+                priority=Priority.REAL_TIME,
+                express=True,
+                reliable=False,
+            )
+            self._publishers[key] = pub
+        pub.put(payload)
+
     # -- Viewer messaging (send/recv/on_message) -------------------------------
 
     def send(self, channel: str, data: bytes | str) -> None:
-        """Send a message to a named channel on this participant's broadcast.
-
-        Published to ``adamo/{org}/{name}/msg/{channel}``.
-        """
+        """Send a message to a named channel on this participant's broadcast."""
         if isinstance(data, str):
             data = data.encode()
         key = self._scoped_key(f"{self._msg_channel_prefix}/{channel}")
@@ -569,8 +604,6 @@ class Robot:
         session = self.session
         full_prefix = self._scoped_key(f"{self._msg_channel_prefix}/")
         key = f"{full_prefix}**"
-        # Session.Sample strips the session's adamo/{org}/ prefix, leaving
-        # `{name}/msg/{channel}`. Strip that shorter prefix here.
         short_prefix = f"{self._name}/{self._msg_channel_prefix}/"
 
         def _handler(sample):

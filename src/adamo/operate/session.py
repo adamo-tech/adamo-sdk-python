@@ -141,8 +141,7 @@ class LivelinessToken:
 class Session:
     """Adamo session — publish and subscribe to data through Adamo's Zenoh infrastructure.
 
-    All key expressions are automatically prefixed with ``adamo/{org}/``
-    unless ``raw=True`` is passed.
+    Keys are scoped to the session's org namespace.
     """
 
     def __init__(self, core_session: "CoreSession", info: ConnectionInfo):
@@ -158,9 +157,7 @@ class Session:
         return self._info.org
 
     def _resolve(self, key_expr: str, raw: bool = False) -> str:
-        if raw:
-            return key_expr
-        return f"{self._prefix}{key_expr}"
+        return key_expr
 
     # -- Publish ---------------------------------------------------------------
 
@@ -255,7 +252,7 @@ class Session:
     # -- Liveliness ------------------------------------------------------------
 
     def alive(self, token_key: str) -> LivelinessToken:
-        """Declare this client alive at ``adamo/{org}/{token_key}/alive``.
+        """Declare this client alive at ``{token_key}/alive``.
 
         The token stays alive until close() or garbage collection.
         """
