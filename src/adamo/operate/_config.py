@@ -9,7 +9,7 @@ from adamo._auth import (
     fetch_config_token,
     fetch_config_token_async,
 )
-from adamo._native import open_core
+from adamo._native import open_core, open_core_mtls
 from adamo.operate.session import Session
 
 DEFAULT_API_URL = "https://q14iirks46.execute-api.eu-west-2.amazonaws.com"
@@ -22,6 +22,7 @@ def connect(
     org_id: str | None = None,
     api_url: str = DEFAULT_API_URL,
     protocol: str = "quic",
+    mtls: bool = False,
 ) -> Session:
     """Connect to Adamo and return a Session.
 
@@ -33,20 +34,19 @@ def connect(
         org_id: Organization ID (only used with ``token``).
         api_url: Override the Adamo API base URL.
         protocol: Transport protocol — ``"quic"`` (default), ``"udp"``, or ``"tcp"``.
+        mtls: When True (and using ``api_key``), mint a per-user mTLS client
+            cert from ``/api/zenoh/cert`` and present it on the Zenoh QUIC
+            handshake. Required once routers enforce mTLS.
 
     Returns:
         A connected :class:`Session`.
     """
     info = _resolve_auth(api_key=api_key, token=token, org_id=org_id, api_url=api_url)
-    # open_core takes the api_key and handles API lookup + zenoh config in Rust.
-    # For token-auth users we fall back to api_key-style if present, otherwise
-    # this path doesn't currently support tokens end-to-end; token users must
-    # go through fetch_config_token to resolve an effective api_key upstream.
     if api_key is None:
         raise NotImplementedError(
             "token-based connect via _native is not yet wired; pass api_key= for now"
         )
-    core = open_core(api_key, protocol)
+    core = open_core_mtls(api_key, protocol) if mtls else open_core(api_key, protocol)
     return Session(core, info)
 
 
@@ -57,6 +57,7 @@ async def connect_async(
     org_id: str | None = None,
     api_url: str = DEFAULT_API_URL,
     protocol: str = "quic",
+    mtls: bool = False,
 ) -> Session:
     """Async version of :func:`connect`.
 
@@ -70,7 +71,7 @@ async def connect_async(
         raise NotImplementedError(
             "token-based connect via _native is not yet wired; pass api_key= for now"
         )
-    core = open_core(api_key, protocol)
+    core = open_core_mtls(api_key, protocol) if mtls else open_core(api_key, protocol)
     return Session(core, info)
 
 
