@@ -173,12 +173,16 @@ class Robot:
         height: int = 720,
         pixel_format: str | None = None,
         keyframe_distance: float = 2.0,
+        stereo: bool = False,
     ) -> None:
         """Attach a video track driven by the Rust pipeline.
 
         Exactly one of ``device`` / ``shm`` / ``ros`` / ``pipeline`` must be
         provided. The Rust side owns the capture and encoder thread; frames
         never cross into Python.
+
+        Set ``stereo=True`` for side-by-side stereo cameras (e.g. ZED) so
+        downstream consumers know to split the frame into left/right eyes.
 
         For a Python-driven frame loop, use :meth:`video` instead.
         """
@@ -199,6 +203,7 @@ class Robot:
             bitrate=bitrate_kbps,
             fps=fps,
             keyframe_distance=keyframe_distance,
+            stereo=stereo,
         )
         if pixel_format is not None:
             kwargs["source_format"] = pixel_format
@@ -232,6 +237,7 @@ class Robot:
         bitrate_kbps: int = 2000,
         fps: int = 30,
         keyframe_distance: float = 2.0,
+        stereo: bool = False,
     ) -> "_VideoTrackType":
         """Create a Python-driven video track. Returns a :class:`VideoTrack`.
 
@@ -262,6 +268,7 @@ class Robot:
             bitrate=bitrate_kbps,
             fps=fps,
             keyframe_distance=keyframe_distance,
+            stereo=stereo,
         )
         # Hook auto-start: first frame pushed will spin up the Rust pipeline
         # in a background thread if the user hasn't called run() yet.
