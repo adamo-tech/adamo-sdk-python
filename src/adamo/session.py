@@ -232,6 +232,9 @@ class Robot:
         bitrate_kbps: int = 2000,
         fps: int = 30,
         keyframe_distance: float = 2.0,
+        intrinsics: list[float] | None = None,
+        extrinsics: list[float] | None = None,
+        depth_for: str | None = None,
     ) -> "_VideoTrackType":
         """Create a Python-driven video track. Returns a :class:`VideoTrack`.
 
@@ -262,6 +265,9 @@ class Robot:
             bitrate=bitrate_kbps,
             fps=fps,
             keyframe_distance=keyframe_distance,
+            intrinsics=intrinsics,
+            extrinsics=extrinsics,
+            depth_for=depth_for,
         )
         # Hook auto-start: first frame pushed will spin up the Rust pipeline
         # in a background thread if the user hasn't called run() yet.

@@ -15,6 +15,7 @@ __all__ = [
     "Robot",
     "Participant",
     "VideoTrack",
+    "cameras",
     "data",
     "operate",
     "stats",
@@ -33,6 +34,9 @@ def __getattr__(name: str):
     if name == "operate":
         import importlib
         return importlib.import_module("adamo.operate")
+    if name == "cameras":
+        import importlib
+        return importlib.import_module("adamo.cameras")
     if name == "stats":
         import importlib
         return importlib.import_module("adamo.stats")
