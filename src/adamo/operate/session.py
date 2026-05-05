@@ -156,6 +156,13 @@ class Session:
     def org(self) -> str:
         return self._info.org
 
+    def relay_rtt(self) -> float | None:
+        """Most recent best RTT to the connected relay, in seconds."""
+        rtt_us = self._session.relay_rtt_us()
+        if rtt_us is None:
+            return None
+        return rtt_us / 1_000_000
+
     def _resolve(self, key_expr: str, raw: bool = False) -> str:
         return key_expr
 
@@ -248,6 +255,24 @@ class Session:
         resolved = self._resolve(key_expr, raw)
         core_samples = self._session.get(resolved, timeout_ms=timeout_ms)
         return [Sample(s, self._prefix) for s in core_samples]
+
+    # -- Latency stats ---------------------------------------------------------
+
+    def watch_latency(
+        self,
+        name: str,
+        callback: Callable[["LatencyStats"], None],  # noqa: F821
+    ) -> CallbackSubscriber:
+        """Stream parsed latency stats from ``name``'s heartbeat."""
+        from adamo.stats import watch_latency
+
+        return watch_latency(self, name, callback)
+
+    def measure_rtt(self, name: str, timeout: float = 1.0) -> float:
+        """One-shot RTT probe to ``name``. Returns seconds."""
+        from adamo.stats import measure_rtt
+
+        return measure_rtt(self, name, timeout)
 
     # -- Liveliness ------------------------------------------------------------
 

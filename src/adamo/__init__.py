@@ -17,6 +17,7 @@ __all__ = [
     "VideoTrack",
     "data",
     "operate",
+    "stats",
 ]
 
 
@@ -32,4 +33,7 @@ def __getattr__(name: str):
     if name == "operate":
         import importlib
         return importlib.import_module("adamo.operate")
+    if name == "stats":
+        import importlib
+        return importlib.import_module("adamo.stats")
     raise AttributeError(f"module 'adamo' has no attribute {name!r}")

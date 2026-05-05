@@ -529,6 +529,37 @@ class Robot:
 
         return _wrap
 
+    # -- Latency stats ---------------------------------------------------------
+
+    def watch_latency(
+        self,
+        name: str,
+        callback: Callable[["LatencyStats"], None],  # noqa: F821
+    ):
+        """Stream latency stats from another robot.
+
+        Subscribes to ``name``'s heartbeat and invokes ``callback`` with
+        each parsed :class:`adamo.stats.LatencyStats`. Heartbeats with
+        no forecast block (the very first one after a robot starts) are
+        silently dropped.
+        """
+        from adamo.stats import watch_latency
+
+        return watch_latency(self, name, callback)
+
+    def measure_rtt(self, name: str, timeout: float = 1.0) -> float:
+        """One-shot RTT probe to ``name`` via its ping/pong echo. Returns
+        the measured round-trip time in seconds; raises
+        :class:`TimeoutError` if no pong arrives within ``timeout``.
+        """
+        from adamo.stats import measure_rtt
+
+        return measure_rtt(self, name, timeout)
+
+    def relay_rtt(self) -> float | None:
+        """Most recent best RTT to the connected relay, in seconds."""
+        return self.session.relay_rtt()
+
     # -- Logging ----------------------------------------------------------------
 
     def log(self, message: str, *, level: str = "info") -> None:
