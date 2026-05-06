@@ -28,6 +28,6 @@ dev = [
 
 [tool.maturin]
 manifest-path = "../Cargo.toml"
-features = ["python"]
+features = ["python", "gstreamer"]
 module-name = "adamo._native"
 python-source = "src"
